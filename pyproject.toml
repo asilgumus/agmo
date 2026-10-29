@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agmo"
+version = "0.3.0"
+description = "AGMO - AI Guided Machine Optimizer: cross-platform (Linux/Windows/macOS) performance analyzer that finds what slows a PC down, calibrated to the hardware, without blaming the game you are playing."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "asilgumus" }]
+dependencies = ["psutil>=5.9"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+agmo = "agmo.cli:main"
+
+[tool.setuptools]
+packages = ["agmo", "agmo.collectors"]

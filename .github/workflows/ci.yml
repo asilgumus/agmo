@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows ve macOS'ta gerçek toplayıcı kodu koşar:
+        # ctypes (Win32 odak), winreg (GameDVR/startup), osascript/pmset/mdutil
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kurulum
+        run: pip install -e .
+      - name: Unit testler
+        run: python -m unittest discover -s tests -v
+      - name: Sağlık kontrolü (doctor)
+        run: python -m agmo doctor
+      - name: Tarama duman testi (offline)
+        run: python -m agmo scan --offline --no-storage
