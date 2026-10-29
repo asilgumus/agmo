@@ -59,6 +59,11 @@ def _spotlight_state() -> Optional[str]:
     return "enabled"
 
 
+def _launch_agent_dirs() -> List[str]:
+    """LaunchAgents dizinleri (testler enjekte edebilir)."""
+    return [os.path.expanduser("~/Library/LaunchAgents"), "/Library/LaunchAgents"]
+
+
 def collect_extras() -> Dict[str, Dict[str, Any]]:
     boot: Dict[str, Any] = {}
     power: Dict[str, Any] = {}
@@ -79,7 +84,7 @@ def collect_extras() -> Dict[str, Dict[str, Any]]:
         extras["spotlight"] = sp
 
     agents: List[str] = []
-    for d in (os.path.expanduser("~/Library/LaunchAgents"), "/Library/LaunchAgents"):
+    for d in _launch_agent_dirs():
         try:
             agents += [os.path.basename(f) for f in os.listdir(d) if f.endswith(".plist")]
         except Exception:

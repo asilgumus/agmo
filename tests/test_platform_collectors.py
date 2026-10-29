@@ -148,12 +148,14 @@ class TestMacosParsing(unittest.TestCase):
         self.assertTrue(r["power"]["lowpowermode"])
 
     def test_launchagents_listed(self):
+        # hermetik: dizin listesi enjekte edilir (gerçek /Library/LaunchAgents
+        # gerçek macOS'ta karışmasın; Windows'ta expanduser HOME'u görmezden gelir)
         with tempfile.TemporaryDirectory() as tmp:
             la = os.path.join(tmp, "Library", "LaunchAgents")
             os.makedirs(la)
             for name in ("com.apple.finder.plist", "com.backupd.pv.plist"):
                 open(os.path.join(la, name), "w").close()
-            with mock.patch.dict(os.environ, {"HOME": tmp}):
+            with mock.patch.object(macos, "_launch_agent_dirs", lambda: [la]):
                 r = macos.collect_extras()
         self.assertEqual(r["boot"]["login_items_count"], 2)
 
