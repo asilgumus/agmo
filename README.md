@@ -76,9 +76,11 @@ eşik kalibrasyonu, bulgu kuralları, payload gizliliği, rapor smoke testleri.
 ## Durum & dürüstlük notu
 
 - **Linux** bu makinede gerçek uçtan uca doğrulandı (Fedora 44, i7-1360P).
-- **Windows / macOS** iki yolla test edilir:
-  - *CI*: `.github/workflows/ci.yml` push'ta `windows-latest` + `macos-latest` (gerçek OS) runner'larında
-    test paketi + `agmo doctor` + `agmo scan --offline` koşar — ctypes/winreg/osascript yolları gerçekten çalışır.
+- **Windows / macOS** gerçek OS'lerde doğrulandı (CI matrisi yeşil):
+  `.github/workflows/ci.yml` her push'ta `ubuntu` + `windows` + `macos` runner'larında
+  test paketi + `agmo doctor` + `agmo scan --offline` koşar. Kanıtlanan yollar:
+  Win32 odak algılama (`WindowsTerminal.exe`, kaynak: win32), winreg/GameDVR, osascript/pmset,
+  sysctl CPU modeli, diskutil SSD tespiti.
   - *Mock testler*: `tests/test_platform_collectors.py` OS çağrılarının parsing mantığını her platformda sınar
     (bu testler zaten gerçek bir bug yakalayıp düzeltti: Spotlight "Indexing disabled" yanlış okuması).
 - Bilinen sınırlama: GNOME Wayland oturumunda odak penceresi varsayılan izinlerle okunamayabilir
