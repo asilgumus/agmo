@@ -1,8 +1,9 @@
-"""AGMO ayarları: API anahtarı/model. Öncelik:
+"""AGMO ayarları: API anahtarı/provider/model. Öncelik:
 
-1. Çevre değişkeni: AGMO_XAI_API_KEY > XAI_API_KEY > GROK_API_KEY
-2. Ayar dosyası: ~/.config/agmo/config.toml  ([ai] api_key, model)
+1. Çevre değişkeni: GEMINI_API_KEY > GOOGLE_API_KEY > AGMO_XAI_API_KEY > XAI_API_KEY > GROK_API_KEY
+2. Ayar dosyası: ~/.config/agmo/config.toml  ([ai] api_key, provider, model, base_url)
 
+Sağlayıcı verilmezse anahtar önekinden seçilir ("AQ."/"AIza" → gemini, "xai-" → xai).
 Anahtar ASLA repoya/veri dosyalarına yazılmaz; dosyada tutulursa izin 0600 olur.
 """
 from __future__ import annotations
@@ -12,8 +13,7 @@ import stat
 from typing import Dict, Optional
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".config", "agmo", "config.toml")
-DEFAULT_BASE_URL = "https://api.x.ai"
-DEFAULT_MODEL = "auto"  # /v1/models'tan otomatik seç
+DEFAULT_MODEL = "auto"  # sağlayıcının model listesinden otomatik seç
 
 
 def _read_file_config() -> Dict[str, str]:
@@ -39,23 +39,28 @@ def _read_file_config() -> Dict[str, str]:
 
 def get_ai_config() -> Dict[str, Optional[str]]:
     file_cfg = _read_file_config()
-    key = (os.environ.get("AGMO_XAI_API_KEY") or os.environ.get("XAI_API_KEY")
-           or os.environ.get("GROK_API_KEY")
-           or file_cfg.get("api_key") or None)
+    key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+           or os.environ.get("AGMO_XAI_API_KEY") or os.environ.get("XAI_API_KEY")
+           or os.environ.get("GROK_API_KEY") or file_cfg.get("api_key") or None)
     model = os.environ.get("AGMO_MODEL") or file_cfg.get("model") or DEFAULT_MODEL
-    base = os.environ.get("AGMO_XAI_BASE") or file_cfg.get("base_url") or DEFAULT_BASE_URL
-    return {"api_key": key, "model": model, "base_url": base.rstrip("/")}
+    base = (os.environ.get("AGMO_AI_BASE") or file_cfg.get("base_url") or "").rstrip("/") or None
+    provider = (os.environ.get("AGMO_AI_PROVIDER") or file_cfg.get("provider") or "").lower() or None
+    return {"api_key": key, "provider": provider, "model": model, "base_url": base}
 
 
-def set_config(api_key: Optional[str] = None, model: Optional[str] = None) -> str:
+def set_config(api_key: Optional[str] = None, model: Optional[str] = None,
+               provider: Optional[str] = None) -> str:
     """Ayar dosyasına yazar (0600)."""
     cfg = get_ai_config()
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     lines = ["[ai]"]
     new_key = api_key if api_key is not None else cfg.get("api_key")
     new_model = model if model is not None else cfg.get("model")
+    new_prov = (provider or "").strip().lower() if provider is not None else cfg.get("provider")
     if new_key:
         lines.append(f'api_key = "{new_key}"')
+    if new_prov and new_prov not in ("auto", "none", ""):
+        lines.append(f'provider = "{new_prov}"')
     if new_model and new_model != DEFAULT_MODEL:
         lines.append(f'model = "{new_model}"')
     body = "\n".join(lines) + "\n"

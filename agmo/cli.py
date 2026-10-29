@@ -4,7 +4,7 @@ Kullanım:
   agmo scan [--focus VALORANT] [--json] [--offline] [--no-storage] [--model ad]
   agmo watch [--every 30]
   agmo doctor [--ai]
-  agmo config --show | --set-key xai-... | --set-model grok-4-fast
+  agmo config --show | --set-key | --set-provider gemini | --set-model grok-4-fast
   agmo kill <pid> [--yes]
   agmo clean-cache [--yes]
 """
@@ -19,7 +19,7 @@ from typing import List, Optional
 
 from agmo import __version__, analyze as analyze_mod
 from agmo.actions import cache_report, clean_cache, kill_pid
-from agmo.ai import enrich
+from agmo.ai import enrich, provider_of
 from agmo.collectors import collect_snapshot
 from agmo.config import get_ai_config, set_config
 from agmo.hardware import collect as collect_hardware
@@ -39,7 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true", help="makine-okur JSON çıktı")
     s.add_argument("--offline", action="store_true", help="AI katmanını atla (yalnız yerel analiz)")
     s.add_argument("--no-storage", action="store_true", help="önbellek boyut taramasını atla (daha hızlı)")
-    s.add_argument("--model", help="Grok modeli (örn. grok-4-fast); varsayılan: auto")
+    s.add_argument("--model", help="AI modeli (örn. gemini-3.5-flash, grok-4-fast); varsayılan: auto")
     s.add_argument("--no-color", action="store_true")
 
     w = sub.add_parser("watch", help="sürekli izleme (bellek kaçışı/sürücü tespiti)")
@@ -50,9 +50,10 @@ def _build_parser() -> argparse.ArgumentParser:
     d.add_argument("--ai", action="store_true", help="AI uç noktasını da dene")
     d.add_argument("--no-color", action="store_true")
 
-    c = sub.add_parser("config", help="API anahtarı/model ayarı")
+    c = sub.add_parser("config", help="API anahtarı/sağlayıcı/model ayarı")
     c.add_argument("--show", action="store_true")
-    c.add_argument("--set-key", metavar="XAI_KEY")
+    c.add_argument("--set-key", metavar="XAI_OR_GEMINI_KEY")
+    c.add_argument("--set-provider", metavar="PROVIDER", help="gemini | xai (boşsa önekten otomatik)")
     c.add_argument("--set-model", metavar="MODEL")
 
     k = sub.add_parser("kill", help="süreç sonlandır (onaylı; kritik/anti-cheat reddedilir)")
@@ -78,7 +79,7 @@ def _do_scan(args) -> int:
         if args.model:
             cfg["model"] = args.model
         if cfg.get("api_key"):
-            print_brief("AI yorumu isteniyor (Grok)...")
+            print_brief(f"AI yorumu isteniyor ({provider_of(cfg)})...")
         analysis = enrich(analysis, hw, cfg)
 
     if args.json:
@@ -157,32 +158,21 @@ def _do_doctor(color: bool = True, with_ai: bool = False) -> int:
     cfg = get_ai_config()
     if cfg.get("api_key"):
         k = str(cfg["api_key"])
-        shape = "xai- öneki ✓" if k.startswith("xai-") else \
-                ("UYARI: anahtar 'xai-' ile başlamıyor — xAI gizli anahtarı değildir.")
+        prov = provider_of(cfg)
+        if k.startswith(("xai-", "AQ.", "AIza")):
+            shape = f"{k[:4]}… öneki ✓ ({prov})"
+        else:
+            shape = f"UYARI: bilinmeyen önek — sağlayıcı varsayılanı '{prov}' ile denenecek"
         print(f"  ai_anahtar    : var ({shape})")
     else:
         print("  ai_anahtar    : yok (AI katmanı kapalı kalacak)")
     if with_ai and cfg.get("api_key"):
-        import urllib.error
-        import urllib.request
         print("  ai_ping       : deneniyor...", flush=True)
         t0 = time.time()
-        cfg2 = get_ai_config()
-        cfg2["model"] = "auto"
         try:
-            from agmo.ai import resolve_model
-            base = str(cfg2["base_url"])
-            req = urllib.request.Request(
-                f"{base}/v1/chat/completions",
-                data=json.dumps({"model": resolve_model(base, str(cfg2["api_key"]), "auto"),
-                                 "messages": [{"role": "user", "content": "ping — yalnızca 'pong' yaz"}],
-                                 "max_tokens": 5}).encode("utf-8"),
-                headers={"Authorization": f"Bearer {cfg2['api_key']}",
-                         "Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.loads(r.read().decode())
-            print(f"  ai_ping       : OK '{data['choices'][0]['message']['content'][:20]}' "
-                  f"({time.time() - t0:.1f}s)")
+            from agmo.ai import ping as ai_ping
+            out = ai_ping(cfg)
+            print(f"  ai_ping       : OK {out} ({time.time() - t0:.1f}s)")
         except Exception as e:
             print(f"  ai_ping       : HATA {e}")
     return 0
@@ -192,15 +182,18 @@ def _do_config(args) -> int:
     if args.show:
         cfg = get_ai_config()
         k = cfg.get("api_key")
-        print(f"base_url : {cfg.get('base_url')}")
+        print(f"provider : {cfg.get('provider') or 'otomatik (anahtar önekinden)'}")
+        if cfg.get("base_url"):
+            print(f"base_url : {cfg.get('base_url')}")
         print(f"model    : {cfg.get('model')}")
         print(f"api_key  : {'ayarı var (' + str(k)[:8] + '……)' if k else 'yok'}")
         return 0
-    if args.set_key or args.set_model:
-        path = set_config(api_key=args.set_key, model=args.set_model)
+    if args.set_key or args.set_model or args.set_provider:
+        path = set_config(api_key=args.set_key, model=args.set_model,
+                          provider=args.set_provider)
         print(f"Ayar yazıldı: {path} (izin 0600)")
         return 0
-    print("Ne yapacaksın? --show | --set-key | --set-model")
+    print("Ne yapacaksın? --show | --set-key | --set-provider | --set-model")
     return 1
 
 

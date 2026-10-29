@@ -1,7 +1,8 @@
-"""AI katmanı: Grok (xAI) ile telemetri yorumlatma + yerel analiza düşüş.
+"""AI katmanı: Gemini (Google) veya Grok (xAI) ile telemetri yorumlatma + yerel analiza düşüş.
 
-- Anahtar: env (AGMO_XAI_API_KEY/XAI_API_KEY/GROK_API_KEY) veya config.toml
-- Model: "auto" ise /v1/models'tan tercih sırasına göre seçilir
+- Anahtar: env (GEMINI_API_KEY/GOOGLE_API_KEY/AGMO_XAI_API_KEY/XAI_API_KEY/GROK_API_KEY) veya config.toml
+- Sağlayıcı: config'de "provider" verilmezse anahtar önekinden seçilir ("AQ."/"AIza" → gemini, "xai-" → xai)
+- Model: "auto" ise sağlayıcının model listesinden tercih sırasına göre seçilir
 - Çıktı: katı JSON şeması; ayrıştırma başarısızsa yerel bulgular kullanılır
 - Payload hiçbir zaman kullanıcı yolunu içermez (scrub edilir)
 """
@@ -22,6 +23,15 @@ from agmo.util import fmt_gib, scrub
 MODEL_PREFERENCE = [
     "grok-4-fast", "grok-4-1-fast", "grok-4", "grok-code-fast", "grok-3-mini", "grok-3",
 ]
+XAI_BASE = "https://api.x.ai"
+GEMINI_BASE = "https://generativelanguage.googleapis.com"
+GEMINI_MODEL_PREFERENCE = [
+    "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-flash-latest",
+    "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash",
+]
+# metin konuşması olmayan modeller (görüntü/TTS/konuşma/altyapı) listelenirken atılır
+GEMINI_EXCLUDE = ("-tts", "-image", "embedding", "nano-banana", "veo", "imagen",
+                  "aqa", "-audio", "gemma", "thinking", "robotics")
 
 SYSTEM_PROMPT = """Sen AGMO adlı aracın analiz motorusun: Linux/Windows/macOS makinelerinden \
 gelen performans telemetrisini yorumluyorsun ve kullanıcıya TÜRKÇE öneri veriyorsun.
@@ -145,27 +155,76 @@ def _http_detail(e: urllib.error.HTTPError) -> str:
     return f"HTTP {e.code}"
 
 
-def resolve_model(base: str, key: str, configured: str) -> str:
+def provider_of(cfg: Dict[str, Optional[str]]) -> str:
+    """Sağlayıcıyı seç: config'de açıkça verilmişse o, öyleyse anahtar öneki,
+    hiçbiri tutmazsa xai (geriye doğru uyumluluk)."""
+    explicit = str(cfg.get("provider") or "").strip().lower()
+    if explicit in ("gemini", "google"):
+        return "gemini"
+    if explicit in ("xai", "grok", "x"):
+        return "xai"
+    key = str(cfg.get("api_key") or "")
+    if key.startswith(("AQ.", "AIza")):
+        return "gemini"
+    if key.startswith("xai-"):
+        return "xai"
+    return "xai"
+
+
+def base_of(cfg: Dict[str, Optional[str]], provider: str) -> str:
+    cfg_base = str(cfg.get("base_url") or "").rstrip("/")
+    if cfg_base:
+        return cfg_base
+    return GEMINI_BASE if provider == "gemini" else XAI_BASE
+
+
+def _gemini_model_ids(base: str, key: str) -> List[str]:
+    req = urllib.request.Request(f"{base}/v1beta/models?pageSize=200",
+                                 headers={"x-goog-api-key": key})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    ids: List[str] = []
+    for m in data.get("models", []):
+        mid = str(m.get("name", ""))
+        if mid.startswith("models/"):
+            mid = mid[len("models/"):]
+        if not mid:
+            continue
+        if "generateContent" not in (m.get("supportedGenerationMethods") or []):
+            continue
+        if any(x in mid for x in GEMINI_EXCLUDE):
+            continue
+        ids.append(mid)
+    return ids
+
+
+def resolve_model(provider: str, base: str, key: str, configured: str) -> str:
+    """Sağlayıcının model listesinden otomatik seçim ("auto" ise)."""
     if configured and configured != DEFAULT_MODEL:
-        return configured
+        return configured.replace("models/", "")
     try:
-        req = urllib.request.Request(
-            f"{base}/v1/models",
-            headers={"Authorization": f"Bearer {key}"},
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        ids = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
-        for pref in MODEL_PREFERENCE:
+        if provider == "gemini":
+            ids = _gemini_model_ids(base, key)
+            prefs, fallback_token = GEMINI_MODEL_PREFERENCE, "flash"
+        else:
+            req = urllib.request.Request(f"{base}/v1/models",
+                                         headers={"Authorization": f"Bearer {key}"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            ids = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+            prefs, fallback_token = MODEL_PREFERENCE, "grok"
+        for pref in prefs:
             for mid in ids:
                 if mid.startswith(pref) or pref in mid:
                     return mid
         for mid in ids:
-            if "grok" in mid:
+            if fallback_token in mid:
                 return mid
         raise ValueError("listed model bulunamadı")
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"model listesi alınamadı ({_http_detail(e)})") from e
+    except RuntimeError:
+        raise
     except Exception as e:
         raise RuntimeError(f"model seçilemedi: {e}") from e
 
@@ -193,37 +252,19 @@ def _valid_sev(s: Any) -> str:
     return s if s in ("low", "medium", "high", "critical") else "medium"
 
 
-def enrich(analysis: Analysis, hw: Hardware, cfg: Dict[str, Optional[str]]
-           ) -> Analysis:
-    """AI katmanını çalıştır; sonuç Analysis.ai + AI bulgular olarak eklenir.
-
-    API yoksa/hatalıysa status="error" olur ve yerel bulgular korunur.
-    """
-    key = cfg.get("api_key")
-    base = cfg.get("base_url") or "https://api.x.ai"
-    if not key:
-        analysis.ai = {"status": "off",
-                       "detail": "AI anahtarı tanımlı değil — yerel analiz gösteriliyor. "
-                                 "Anahtarı XAI_API_KEY ortam değişkeni veya ~/.config/agmo/config.toml ile ver."}
-        return analysis
-    try:
-        model = resolve_model(base, key, str(cfg.get("model") or DEFAULT_MODEL))
-    except Exception as e:
-        analysis.ai = {"status": "error", "detail": str(e)}
-        return analysis
-
+def _xai_content(base: str, key: str, model: str, user_text: str,
+                 max_tokens: int = 1800) -> Tuple[Optional[str], str]:
+    """Grok (xAI, OpenAI tarzı) sohbet tamamlama; (içerik, hata-notu) döndürür."""
     body = {
         "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_payload(analysis.snapshot, hw, analysis)},
+            {"role": "user", "content": user_text},
         ],
         "temperature": 0.2,
-        "max_tokens": 1800,
+        "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }
-    content = None
-    detail = ""
     for attempt in (0, 1):
         try:
             req = urllib.request.Request(
@@ -235,8 +276,7 @@ def enrich(analysis: Analysis, hw: Hardware, cfg: Dict[str, Optional[str]]
             with urllib.request.urlopen(req, timeout=90) as resp:
                 data = json.loads(resp.read().decode("utf-8", "replace"))
             content = data["choices"][0]["message"]["content"]
-            detail = ""
-            break
+            return (content or None), ""
         except urllib.error.HTTPError as e:
             try:
                 err = json.loads(e.read().decode("utf-8", "replace"))
@@ -246,19 +286,126 @@ def enrich(analysis: Analysis, hw: Hardware, cfg: Dict[str, Optional[str]]
             if e.code == 400 and attempt == 0 and "response_format" in msg:
                 body.pop("response_format", None)  # bazı modellerde desteklenmez
                 continue
-            detail = f"HTTP {e.code}: {msg}"
+            return None, f"HTTP {e.code}: {msg}"
+        except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as e:
+            return None, f"bağlantı/yanıt hatası: {e}"
+    return None, ""
+
+
+def _gemini_body(user_text: str, json_mode: bool, max_tokens: int) -> Dict[str, Any]:
+    gen: Dict[str, Any] = {"temperature": 0.2, "maxOutputTokens": max_tokens}
+    if json_mode:
+        gen["responseMimeType"] = "application/json"
+    return {
+        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+        "generationConfig": gen,
+    }
+
+
+def _gemini_text(data: Dict[str, Any]) -> str:
+    cands = data.get("candidates") or []
+    parts = ((cands[0].get("content") or {}).get("parts")) or []
+    # "thought": true parçaları modelin iç düşünmesi — yanıta karıştırılmaz
+    return "".join(str(p.get("text", "")) for p in parts
+                   if not p.get("thought")).strip()
+
+
+def _gemini_content(base: str, key: str, model: str, user_text: str,
+                    max_tokens: int = 2600) -> Tuple[Optional[str], str]:
+    """Google Gemini generateContent; (içerik, hata-notu) döndürür."""
+    last = ""
+    for attempt in (0, 1):
+        tokens = max_tokens if attempt == 0 else max_tokens + 1400
+        try:
+            req = urllib.request.Request(
+                f"{base}/v1beta/models/{model}:generateContent",
+                data=json.dumps(_gemini_body(user_text, attempt == 0, tokens)).encode("utf-8"),
+                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            text = _gemini_text(data)
+            finish = ((data.get("candidates") or [{}])[0].get("finishReason")) or "bölünmemiş"
+            # MAX_TOKENS: JSON ortadan kesilmiş olabilir — metin dolu görünse de
+            # güvenilmez; token bütçesini büyüterek tekrar dene
+            if text and finish != "MAX_TOKENS":
+                return text, ""
+            last = (f"boş yanıt (finishReason={finish})" if not text
+                    else f"yanıt MAX_TOKENS ile kesildi (finishReason=MAX_TOKENS)")
+            if finish == "MAX_TOKENS" and attempt == 0:
+                continue
+            if text:
+                # ikinci denemede de kesildiyse elimizdekiyle devam (not detail'de)
+                return text, ("" if attempt == 0 else last)
+            break
+        except urllib.error.HTTPError as e:
+            last = _http_detail(e)
+            if e.code == 400 and attempt == 0:
+                continue  # responseMimeType bazı modellerde kapalı
             break
         except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as e:
-            detail = f"bağlantı/yanıt hatası: {e}"
+            last = f"bağlantı/yanıt hatası: {e}"
             break
+    return None, last
+
+
+def _chat(provider: str, base: str, key: str, model: str, user_text: str,
+          max_tokens: int = 1800) -> Tuple[Optional[str], str]:
+    if provider == "gemini":
+        return _gemini_content(base, key, model, user_text, max_tokens=max(max_tokens, 2600))
+    return _xai_content(base, key, model, user_text, max_tokens=max_tokens)
+
+
+def ping(cfg: Dict[str, Optional[str]]) -> str:
+    """doctor için küçük istek; 'provider/model → yanıt' döndürür, hata exception."""
+    key = str(cfg.get("api_key") or "")
+    if not key:
+        raise RuntimeError("anahtar yok")
+    provider = provider_of(cfg)
+    base = base_of(cfg, provider)
+    model = resolve_model(provider, base, key, str(cfg.get("model") or DEFAULT_MODEL))
+    text, detail = _chat(provider, base, key, model, "ping — yalnızca 'pong' yaz",
+                         max_tokens=8)
+    if not text:
+        raise RuntimeError(detail or "boş yanıt")
+    return f"{provider}/{model} → '{text[:20]}'"
+
+
+def enrich(analysis: Analysis, hw: Hardware, cfg: Dict[str, Optional[str]]
+           ) -> Analysis:
+    """AI katmanını çalıştır; sonuç Analysis.ai + AI bulgular olarak eklenir.
+
+    API yoksa/hatalıysa status="error"tur ve yerel bulgular korunur.
+    """
+    key = cfg.get("api_key")
+    if not key:
+        analysis.ai = {"status": "off",
+                       "detail": "AI anahtarı tanımlı değil — yerel analiz gösteriliyor. "
+                                 "Anahtarı GEMINI_API_KEY/XAI_API_KEY ortam değişkeni veya "
+                                 "~/.config/agmo/config.toml ile ver."}
+        return analysis
+    provider = provider_of(cfg)
+    base = base_of(cfg, provider)
+    try:
+        model = resolve_model(provider, base, key, str(cfg.get("model") or DEFAULT_MODEL))
+    except Exception as e:
+        analysis.ai = {"status": "error", "provider": provider, "detail": str(e)}
+        return analysis
+
+    content, detail = _chat(provider, base, key, model,
+                            build_payload(analysis.snapshot, hw, analysis))
 
     analysis.ai = {"status": "ok" if content else "error",
-                   "model": model, "detail": detail}
+                   "provider": provider, "model": model, "detail": detail}
     if not content:
         return analysis
     parsed = _extract_json(content)
     if not isinstance(parsed, dict):
-        analysis.ai["detail"] = "AI yanıtı JSON ayrıştıramadı; yerel bulgular korunuyor."
+        # kesik/bozuk yanıtta "ok" + boş gövde yerine görünür uyarı göster
+        analysis.ai = {"status": "error", "provider": provider, "model": model,
+                       "detail": f"AI yanıtı JSON ayrıştıramadı ({detail or 'keseilmiş olabilir'}); "
+                                 "yerel bulgular korunuyor."}
         return analysis
     analysis.ai["summary"] = str(parsed.get("summary", ""))[:1200]
     analysis.ai["baseline_note"] = str(parsed.get("baseline_note", ""))[:600]

@@ -149,7 +149,8 @@ def render(analysis: Analysis, hw: Hardware, color: bool = True) -> str:
         status = ai.get("status")
         if status == "ok":
             model = ai.get("model", "?")
-            out.append(c(f"🤖 AI yorumu ({model})", BOLD))
+            prov = ai.get("provider") or ""
+            out.append(c(f"🤖 AI yorumu ({(prov + ' · ') if prov else ''}{model})", BOLD))
             if ai.get("baseline_note"):
                 out.append(f"  {ai['baseline_note']}")
             if ai.get("summary"):
@@ -160,7 +161,8 @@ def render(analysis: Analysis, hw: Hardware, color: bool = True) -> str:
             out.append("   Yerel bulgular yukarıda geçerli.")
         else:  # off
             out.append(c("ℹ️ AI katmanı kapalı (anahtar yok) — yerel analiz yukarıda.", DIM))
-            out.append("   Anahtar için: `export XAI_API_KEY=xai-...` veya `agmo config set-key` "
+            out.append("   Anahtar için: `export GEMINI_API_KEY=AQ.…` (Google) veya "
+                       "`export XAI_API_KEY=xai-...`, ya da `agmo config --set-key` "
                        "(config.toml, izin 0600).")
     out.append("")
 

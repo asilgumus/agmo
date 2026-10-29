@@ -25,28 +25,36 @@ Tek bağımlılık `psutil` (Python ≥ 3.9). Yol:
 | `agmo scan --json` | JSON çıktısı (başka araçlara pipo et) |
 | `agmo watch --every 30` | Canlı izleme; ≥300 MiB artan süreçleri işaretler |
 | `agmo doctor --ai` | Toplayıcı sağlığı + anahtar/model testi |
-| `agmo config --set-key xai-...` | Anahtarı `~/.config/agmo/config.toml` (mod 0600) yazar |
+| `agmo config --set-key xai-...` veya `AQ.…` | Anahtarı `~/.config/agmo/config.toml` (mod 0600) yazar |
 | `agmo kill PID --yes` | Süreç sonlandır — sistem-kritik & anti-cheat **reddedilir** |
 | `agmo clean-cache --yes` | Güvenli önbellek temizliği (`~/.cache`, `%TEMP%`, `~/Library/Caches`) |
 
 Ek `scan` bayrakları: `--no-storage` (disk taramasını atla — hızlı), `--no-color`,
-`--model grok-4-fast` (modeli sabitle).
+`--model gemini-2.0-flash` (modeli sabitle).
 
-## Grok (xAI) Anahtarı
+## AI Anahtarı (Gemini varsayılan, Grok/xAI alternatif)
 
-Yerel motor anahtarsız da çalışır; AI yorumu için **gerçek gizli anahtar** gerekir —
-[console.x.ai](https://console.x.ai) → API Keys. Anahtarlar daima `xai-` önekiyle başlar;
-konsol arayüzündeki kimlik/dize parçaları (örn. UUID görünümlü "key id") **gizli anahtar değildir**.
+Yerel motor anahtarsız da çalışır. AI yorumu için iki sağlayıcı desteklenir; sağlayıcı
+**anahtar önekinden otomatik seçilir**, istersen `agmo config --set-provider gemini|xai` ile sabitle.
 
-Tanımlama sırası: `AGMO_XAI_API_KEY` → `XAI_API_KEY` → `GROK_API_KEY` → `~/.config/agmo/config.toml`.
+- **Gemini (Google)** — [aistudio.google.com](https://aistudio.google.com/apikey). Anahtarlar
+  `AIza…` önekiyle gelir; Google Code Assist tipi `AQ.…` anahtarları da kabul edilir.
+  Öncelik: `GEMINI_API_KEY` → `GOOGLE_API_KEY` → `~/.config/agmo/config.toml`.
+- **Grok (xAI)** — [console.x.ai](https://console.x.ai) → API Keys. Anahtarlar daima `xai-`
+  önekiyle başlar; konsol arayüzündeki kimlik/dize parçaları (örn. UUID görünümlü "key id")
+  **gizli anahtar değildir**. Öncelik: `AGMO_XAI_API_KEY` → `XAI_API_KEY` → `GROK_API_KEY` → dosya.
 
 ```bash
-export XAI_API_KEY="xai-…"      # oturum içi
-agmo config --set-key "xai-…"   # kalıcı (chmod 0600)
+export GEMINI_API_KEY="AIza…"   # veya "AQ.…" (Gemini) / "xai-…" (Grok)
+agmo config --set-key "AIza…"   # kalıcı (chmod 0600)
+agmo config --set-provider gemini  # opsiyonel sabitleme (otomatik algıyı geçersiz kılar)
+agmo doctor --ai                # anahtar + model + ping testi
 agmo scan --offline             # test etmeden önce AI'sız doğrula
 ```
 
-Model otomatik seçilir (`grok-4-fast` → `grok-4-1-fast` → `grok-4` → …, `/v1/models` listesinden).
+Model otomatik seçilir: Gemini için `gemini-3.5-flash` → `gemini-flash-latest` → `gemini-2.5-flash`
+→ … (sağlayıcının model listesinden, TTS/görüntü/gemma modelleri dışlanır); Grok için
+`grok-4-fast` → `grok-4-1-fast` → `grok-4` → …
 Anahtar yoksa/hatalıysa rapor AI bölümü yerine *“AI katmanı çalışmadı”* notuyla **yerel analizle tamamlanır**
 — asla kırılmaz.
 
@@ -70,8 +78,9 @@ Anahtar yoksa/hatalıysa rapor AI bölümü yerine *“AI katmanı çalışmadı
 ./run.sh -m unittest discover -s tests   # ya da .venv/bin/python -m unittest discover -s tests
 ```
 
-49 test: sınıflandırıcı tuzakları (Valorant/Vanguard/cod-vs-VSCodium), hariç-tutma matematiği,
-eşik kalibrasyonu, bulgu kuralları, payload gizliliği, rapor smoke testleri.
+89 test: sınıflandırıcı tuzakları (Valorant/Vanguard/cod-vs-VSCodium), hariç-tutma matematiği,
+eşik kalibrasyonu, bulgu kuralları, payload gizliliği, rapor smoke testleri, sağlayıcı/anahtar
+katmanı (Gemini önek algılama, env önceliği, MAX_TOKENS kesilme düşüşü).
 
 ## Durum & dürüstlük notu
 
@@ -93,11 +102,11 @@ agmo/
   classify.py      bilgi tabanı (oyun/anticheat/launcher/sistem imzaları, never-kill)
   hardware.py      donanım toplama (CPU/GPU/disk ortam türü/pil; 3 OS)
   analyze.py       taban çizgisi + bulgu kuralları + donanım kalibrasyonu
-  ai.py            xAI/Grok katmanı (JSON şeması, scrub, fallback)
+  ai.py            Gemini/xAI katmanı (JSON şeması, scrub, fallback)
   report.py        terminal raporu + JSON çıktısı
   actions.py       kill / clean-cache (onaylı, never-kill korumalı)
-  config.py        anahtar/model yapılandırması (env > 0600 dosya)
+  config.py        anahtar/sağlayıcı/model yapılandırması (env > 0600 dosya)
   collectors/      linux.py · windows.py · macos.py · common.py
-tests/             factories + 49 unit test
+tests/             factories + 89 unit test
 run.sh / run.ps1   venv önyükleme
 ```
