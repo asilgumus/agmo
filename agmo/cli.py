@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import io
 import sys
 import time
 from typing import List, Optional
@@ -203,7 +204,24 @@ def _do_config(args) -> int:
     return 1
 
 
+def _utf8_console() -> None:
+    """Windows konsolu cp1252'deyken Türkçe karakterler print'i patlatır
+    (UnicodeEncodeError). Akışları UTF-8'e zorla; olmazsa hataları bas yerine
+    sessiz düş (rapor asla çökmesin)."""
+    if sys.platform != "win32" or not isinstance(sys.stdout, io.TextIOBase):
+        return
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            try:
+                stream.reconfigure(errors="replace")
+            except Exception:
+                pass
+
+
 def main(argv: Optional[List[str]] = None) -> None:
+    _utf8_console()
     args = _build_parser().parse_args(argv)
     try:
         if args.cmd == "scan":
