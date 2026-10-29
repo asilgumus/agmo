@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
@@ -341,8 +342,12 @@ def _gemini_content(base: str, key: str, model: str, user_text: str,
             break
         except urllib.error.HTTPError as e:
             last = _http_detail(e)
+            transient = e.code in (429, 500, 502, 503)  # yüksek talep/dağıtım dalgalanması
             if e.code == 400 and attempt == 0:
                 continue  # responseMimeType bazı modellerde kapalı
+            if transient and attempt == 0:
+                time.sleep(1.5)  # kısa bekleme; geçici kuyruk çoğu zaman açıkılır
+                continue
             break
         except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as e:
             last = f"bağlantı/yanıt hatası: {e}"

@@ -78,7 +78,7 @@ Anahtar yoksa/hatalıysa rapor AI bölümü yerine *“AI katmanı çalışmadı
 ./run.sh -m unittest discover -s tests   # ya da .venv/bin/python -m unittest discover -s tests
 ```
 
-89 test: sınıflandırıcı tuzakları (Valorant/Vanguard/cod-vs-VSCodium), hariç-tutma matematiği,
+91 test: sınıflandırıcı tuzakları (Valorant/Vanguard/cod-vs-VSCodium), hariç-tutma matematiği,
 eşik kalibrasyonu, bulgu kuralları, payload gizliliği, rapor smoke testleri, sağlayıcı/anahtar
 katmanı (Gemini önek algılama, env önceliği, MAX_TOKENS kesilme düşüşü).
 
@@ -107,6 +107,6 @@ agmo/
   actions.py       kill / clean-cache (onaylı, never-kill korumalı)
   config.py        anahtar/sağlayıcı/model yapılandırması (env > 0600 dosya)
   collectors/      linux.py · windows.py · macos.py · common.py
-tests/             factories + 89 unit test
+tests/             factories + 91 unit test
 run.sh / run.ps1   venv önyükleme
 ```

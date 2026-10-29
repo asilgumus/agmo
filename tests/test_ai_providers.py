@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import unittest
+import urllib.error
 from unittest import mock
 
 from agmo import ai as mod
@@ -208,6 +209,47 @@ class TestGeminiModelResolve(unittest.TestCase):
 
 
 # ---------- enrich: düşüş davranışı ----------
+
+class TestGeminiTransientRetry(unittest.TestCase):
+    """503 'high demand' gibi geçici hatalarda tek seferlik bekle-tekrar düşüşü."""
+
+    def _ok_resp(self) -> _FakeResp:
+        return _FakeResp(json.dumps({
+            "candidates": [{"content": {"parts": [{"text": '{"a":1}'}]},
+                           "finishReason": "STOP"}]}).encode())
+
+    def test_503_retries_once_then_succeeds(self):
+        err = urllib.error.HTTPError("u", 503, "busy", None, None)
+        state = {"n": 0}
+
+        def fake_req(req, timeout=None):
+            if state["n"] == 0:
+                state["n"] += 1
+                raise err
+            state["n"] += 1
+            return self._ok_resp()
+
+        with mock.patch.object(mod.urllib.request, "urlopen", fake_req), \
+             mock.patch.object(mod.time, "sleep"):
+            text, detail = mod._gemini_content(mod.GEMINI_BASE, "AQ.k", "m", "p", 2600)
+        self.assertEqual(text, '{"a":1}')
+        self.assertEqual(detail, "")
+        self.assertEqual(state["n"], 2)
+
+    def test_404_does_not_retry(self):
+        err = urllib.error.HTTPError("u", 404, "yok", None, None)
+        state = {"n": 0}
+
+        def fake_req(req, timeout=None):
+            state["n"] += 1
+            raise err
+
+        with mock.patch.object(mod.urllib.request, "urlopen", fake_req):
+            text, detail = mod._gemini_content(mod.GEMINI_BASE, "AQ.k", "m", "p", 2600)
+        self.assertIsNone(text)
+        self.assertIn("HTTP 404", detail)
+        self.assertEqual(state["n"], 1)
+
 
 class TestEnrich(unittest.TestCase):
     def _analysis(self):
