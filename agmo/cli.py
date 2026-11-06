@@ -4,7 +4,7 @@ Kullanım:
   agmo scan [--focus VALORANT] [--json] [--offline] [--no-storage] [--model ad]
   agmo watch [--every 30]
   agmo doctor [--ai]
-  agmo config --show | --set-key | --set-provider gemini | --set-model grok-4-fast
+  agmo config --show | --set-key | --set-provider gemini | --set-model grok-4-fast | --set-base-url URL
   agmo kill <pid> [--yes]
   agmo clean-cache [--yes]
 """
@@ -55,6 +55,8 @@ def _build_parser() -> argparse.ArgumentParser:
     c.add_argument("--set-key", metavar="XAI_OR_GEMINI_KEY")
     c.add_argument("--set-provider", metavar="PROVIDER", help="gemini | xai (boşsa önekten otomatik)")
     c.add_argument("--set-model", metavar="MODEL")
+    c.add_argument("--set-base-url", metavar="URL",
+                   help="özel AI uç noktası (Ollama/vLLM vb.); mevcut base_url korunur")
 
     k = sub.add_parser("kill", help="süreç sonlandır (onaylı; kritik/anti-cheat reddedilir)")
     k.add_argument("pid", type=int)
@@ -188,12 +190,12 @@ def _do_config(args) -> int:
         print(f"model    : {cfg.get('model')}")
         print(f"api_key  : {'ayarı var (' + str(k)[:8] + '……)' if k else 'yok'}")
         return 0
-    if args.set_key or args.set_model or args.set_provider:
+    if args.set_key or args.set_model or args.set_provider or args.set_base_url:
         path = set_config(api_key=args.set_key, model=args.set_model,
-                          provider=args.set_provider)
+                          provider=args.set_provider, base_url=args.set_base_url)
         print(f"Ayar yazıldı: {path} (izin 0600)")
         return 0
-    print("Ne yapacaksın? --show | --set-key | --set-provider | --set-model")
+    print("Ne yapacaksın? --show | --set-key | --set-provider | --set-model | --set-base-url")
     return 1
 
 
