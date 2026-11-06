@@ -49,20 +49,24 @@ def get_ai_config() -> Dict[str, Optional[str]]:
 
 
 def set_config(api_key: Optional[str] = None, model: Optional[str] = None,
-               provider: Optional[str] = None) -> str:
-    """Ayar dosyasına yazar (0600)."""
-    cfg = get_ai_config()
+               provider: Optional[str] = None, base_url: Optional[str] = None) -> str:
+    """Ayar dosyasına yazar (0600). Yalnızca verilen alanlar değişir; dosyadaki
+    diğer alanlar (özellikle base_url) korunur."""
+    cfg = _read_file_config()
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     lines = ["[ai]"]
     new_key = api_key if api_key is not None else cfg.get("api_key")
     new_model = model if model is not None else cfg.get("model")
     new_prov = (provider or "").strip().lower() if provider is not None else cfg.get("provider")
+    new_base = (base_url if base_url is not None else (cfg.get("base_url") or "")).strip().rstrip("/")
     if new_key:
         lines.append(f'api_key = "{new_key}"')
     if new_prov and new_prov not in ("auto", "none", ""):
         lines.append(f'provider = "{new_prov}"')
     if new_model and new_model != DEFAULT_MODEL:
         lines.append(f'model = "{new_model}"')
+    if new_base:
+        lines.append(f'base_url = "{new_base}"')
     body = "\n".join(lines) + "\n"
     fd_path = CONFIG_PATH
     tmp = fd_path + ".tmp"
