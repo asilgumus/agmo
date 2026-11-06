@@ -105,7 +105,7 @@ def _do_watch(every: int, color: bool = True) -> int:
             label = b.game_label or "odak yok"
             moved = []
             for g in snap.procs:
-                key = (g.label or g.names[0] if g.names else "?").lower()
+                key = (g.label or (g.names[0] if g.names else "?")).lower()
                 if key in base_mem:
                     delta = g.mem_mib - base_mem[key]
                     if delta >= 300:
